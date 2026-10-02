@@ -18,6 +18,7 @@ from app.ai.embeddings import (
     build_canonical_embedding_document,
     compute_content_hash,
 )
+from app.crawler.policies import normalize_url
 from app.schemas.lead import (
     LeadStatus,
     LeadListItem,
@@ -149,8 +150,37 @@ class LeadService:
                 # Clean up previous signals to replace with fresh evaluation
                 await self.db.execute(delete(LeadSignal).where(LeadSignal.lead_id == lead.id))
 
-            # Insert Signals
+            # Build allowed page URLs set for this crawl target
+            valid_target_page_urls = set()
+            for p in db_pages:
+                if p.url:
+                    try:
+                        valid_target_page_urls.add(normalize_url(p.url))
+                    except Exception:
+                        pass
+                    valid_target_page_urls.add(p.url.lower().rstrip("/"))
+                if p.final_url:
+                    try:
+                        valid_target_page_urls.add(normalize_url(p.final_url))
+                    except Exception:
+                        pass
+                    valid_target_page_urls.add(p.final_url.lower().rstrip("/"))
+
+            # Insert Signals (with strict cross-company isolation)
             for sig in qualification.signals:
+                if sig.source_url:
+                    try:
+                        norm_sig_url = normalize_url(sig.source_url)
+                    except Exception:
+                        norm_sig_url = sig.source_url.lower().rstrip("/")
+                    
+                    if norm_sig_url not in valid_target_page_urls and sig.source_url.lower().rstrip("/") not in valid_target_page_urls:
+                        logger.warning(
+                            "Rejecting ungrounded or cross-target signal for lead %s: %s (url: %s)",
+                            lead.id, sig.signal, sig.source_url
+                        )
+                        continue
+
                 lead_sig = LeadSignal(
                     lead_id=lead.id,
                     signal=sig.signal,

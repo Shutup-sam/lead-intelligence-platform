@@ -14,21 +14,23 @@ CORE ANTI-HALLUCINATION & EVIDENCE GROUNDING PROTOCOL:
    - NEVER invent technology stack or platforms (e.g., PostgreSQL, React, AWS). Only list technologies explicitly mentioned in the page text, scripts, or metadata. If none are stated, `technology_signals` MUST be [].
    - NEVER invent headquarters, geography, or operating region if not stated. Return "Unknown".
    - NEVER invent target customer personas if not stated. Return "Unknown".
-3. PRECISE SCORING (0-100):
+3. STRICT EVIDENCE TRACEABILITY & NO SYNTHETIC/PLACEHOLDER URLS:
+   - Every `source_url` MUST be chosen exclusively from the ALLOWED EVIDENCE URLS list provided in the prompt.
+   - NEVER invent URLs, placeholder URLs (such as example.com, test.com, or synthetic paths), or URLs not fetched for this crawl target.
+   - Quoted `evidence` MUST be verbatim quotations of text that actually exists in the crawled content of the cited page.
+4. PRECISE SCORING (0-100):
    - 80-100: Exceptional fit. Matches target industries, verified B2B software/service offering, target geography, with strong positive evidence.
    - 60-79: Strong fit. Minor gaps or unverified headcount, but clearly matching core offering and industry.
    - 40-59: Moderate / Unclear fit. Tangentially related, consulting rather than product, or ambiguous business model.
-   - 0-39: Poor fit or Disqualified. Consumer B2C only, personal blog, educational demo sandbox, or explicitly flagged negative signal.
-4. CONFIDENCE SCORE (0.0 - 1.0):
+   - 0-39: Poor fit or Disqualified. Consumer B2C only, personal blog, educational demo sandbox, stock broking/retail financial services (when targeting B2B SaaS), or explicitly flagged negative signal.
+5. CONFIDENCE SCORE (0.0 - 1.0):
    - Reflects completeness of crawled evidence. High confidence (0.8+) requires verified about/product/pricing pages or definitive negative evidence proving non-commercial status.
-5. SEPARATION OF FACTS, INFERENCES, AND UNKNOWNS:
+6. SEPARATION OF FACTS, INFERENCES, AND UNKNOWNS:
    - Observed Facts: Directly observed, verifiable statements with exact page citations.
    - Inferred Signals: Deductions derived with explicit reasoning, confidence (0.0 to 1.0), and evidence.
    - Unknown Information: Explicitly list all fields for which the crawler found zero evidence.
-6. NEGATIVE EVIDENCE UTILIZATION:
+7. NEGATIVE EVIDENCE UTILIZATION:
    - If a target site is an informational demonstration, quotes collection, scraping sandbox, or personal blog, you MUST use the real negative evidence that actually exists to disqualify it (assigning an ICP score below 25).
-7. SOURCE TRACEABILITY:
-   - Every entry in `signals` and `grounded_attributes` must cite the exact `source_url` where evidence was found (or null if unknown).
 8. JSON ONLY: Return strictly valid JSON adhering to the specified schema with no commentary or markdown wrappers outside the JSON.
 """
 
@@ -56,6 +58,9 @@ def build_qualification_user_prompt(
         indent=2,
     )
 
+    allowed_urls = [p.get("url") for p in pages_data if p.get("url")]
+    allowed_urls_list_str = "\n".join([f"- {u}" for u in allowed_urls])
+
     pages_text_blocks = []
     current_char_count = 0
 
@@ -65,7 +70,7 @@ def build_qualification_user_prompt(
         markdown = page.get("content_markdown", "").strip()
         metadata = page.get("metadata", {})
 
-        page_block = f"--- PAGE {idx}: {title} ---\nURL: {url}\n"
+        page_block = f"=== CRAWLED PAGE {idx} (ID: PAGE_{idx}) ===\nURL: {url}\nTitle: {title}\n"
         if metadata.get("description"):
             page_block += f"Meta Description: {metadata['description']}\n"
         if metadata.get("emails"):
@@ -99,16 +104,22 @@ Root URL: {target_url}
 === IDEAL CUSTOMER PROFILE (ICP) CRITERIA ===
 {icp_section}
 
+=== ALLOWED EVIDENCE URLS (CRITICAL: YOU MAY ONLY CITE URLS FROM THIS EXACT LIST) ===
+{allowed_urls_list_str}
+
 === CRAWLED PAGES & EXTRACTED EVIDENCE ===
 {all_pages_text}
 
-=== GROUNDING INSTRUCTIONS ===
-1. If employee count/headcount is NOT explicitly stated in the text, set "estimated_company_size": "Unknown".
-2. If the site does NOT sell or provide commercial products or services, set "products_or_services": [].
-3. If no commercial business model is stated, set "business_model": "Unknown" or "Non-Commercial / Sandbox".
-4. If technologies are NOT explicitly stated in the text, set "technology_signals": [].
-5. If geography/headquarters is NOT stated in the text, set "geography": "Unknown".
-6. In "unknown_attributes", explicitly list all attributes where evidence was absent.
+=== GROUNDING & EVIDENCE INTEGRITY INSTRUCTIONS ===
+1. Every "source_url" in "signals" and "grounded_attributes" MUST be chosen exclusively from the ALLOWED EVIDENCE URLS list above.
+2. NEVER use example.com, placeholder URLs, synthetic URLs, or any URL not listed above. Any unlisted URL will be rejected as hallucination.
+3. Every "evidence" snippet MUST be a verbatim quote of words that actually exist in the crawled content of that cited page.
+4. If employee count/headcount is NOT explicitly stated in the text, set "estimated_company_size": "Unknown".
+5. If the site does NOT sell or provide commercial products or services, set "products_or_services": [].
+6. If no commercial business model is stated, set "business_model": "Unknown" or "Non-Commercial / Sandbox".
+7. If technologies are NOT explicitly stated in the text, set "technology_signals": [].
+8. If geography/headquarters is NOT stated in the text, set "geography": "Unknown".
+9. In "unknown_attributes", explicitly list all attributes where evidence was absent.
 
 === REQUIRED JSON OUTPUT FORMAT ===
 Produce a single JSON object with the following schema:

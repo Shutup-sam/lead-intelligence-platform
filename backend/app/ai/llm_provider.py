@@ -1,6 +1,7 @@
 import abc
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass
 from typing import Dict, Any, Tuple, Optional
@@ -117,9 +118,18 @@ class MockLLMProvider(BaseLLMProvider):
     ) -> LLMExecutionResult:
         start_time = time.perf_counter()
 
-        # Simple heuristic to produce tailored mock data based on input domain/content
+        # Parse allowed crawled URLs and domain from prompt
+        allowed_urls = re.findall(r"^- (https?://[^\s\n]+)", user_prompt, re.MULTILINE)
+        if not allowed_urls:
+            allowed_urls = re.findall(r"URL:\s*(https?://[^\s\n]+)", user_prompt)
+        
+        domain_match = re.search(r"Domain:\s*([^\s\n]+)", user_prompt)
+        prompt_domain = domain_match.group(1).lower() if domain_match else "unknown.com"
+        primary_url = allowed_urls[0] if allowed_urls else f"https://{prompt_domain}/"
+
         prompt_lower = user_prompt.lower()
-        is_quote_site = "quotes.toscrape" in prompt_lower
+        is_quote_site = "quotes.toscrape" in prompt_lower or "quotes.toscrape" in prompt_domain
+        is_choice_india = "choiceindia.com" in prompt_lower or "choiceindia.com" in prompt_domain
         is_demo_sandbox = (
             is_quote_site
             or "educational demo sandbox" in prompt_lower
@@ -150,27 +160,30 @@ class MockLLMProvider(BaseLLMProvider):
                 "Educational demo sandbox not suited for enterprise software ICP",
             ]
             reasoning = "The crawled content demonstrates that the target is strictly an informational demonstration sandbox hosting quotes, not a commercial enterprise or software buyer. Commercial attributes including company size, products, technology stack, and business model are unevidenced in the crawled text and are designated as Unknown."
-            source_root = "https://quotes.toscrape.com/" if is_quote_site else "https://example.com/"
+            if "educational demo sandbox for scraping" in prompt_lower:
+                sandbox_quote = "Educational demo sandbox for scraping."
+            elif "quotes to scrape" in prompt_lower:
+                sandbox_quote = "Quotes to Scrape"
+            elif "demo sandbox" in prompt_lower:
+                sandbox_quote = "demo sandbox"
+            elif "sandbox" in prompt_lower:
+                sandbox_quote = "sandbox"
+            else:
+                sandbox_quote = "scraping"
+
+            source_root = primary_url
             signals = [
                 {
                     "signal": "Educational demo sandbox",
-                    "evidence": "Website hosts quotes for demonstration purposes with no commercial products.",
+                    "evidence": sandbox_quote,
                     "source_url": source_root,
                     "sentiment": "negative",
                     "status": "observed",
                     "confidence": 1.0,
                 },
                 {
-                    "signal": "No commercial business model",
-                    "evidence": "No pricing, SaaS subscriptions, or sales contacts found in crawled pages.",
-                    "source_url": source_root,
-                    "sentiment": "negative",
-                    "status": "observed",
-                    "confidence": 1.0,
-                },
-                {
-                    "signal": "No commercial products or services",
-                    "evidence": "Site contains no product catalog, software applications, or commercial offerings.",
+                    "signal": "Non-commercial demonstration entity",
+                    "evidence": sandbox_quote,
                     "source_url": source_root,
                     "sentiment": "negative",
                     "status": "observed",
@@ -179,16 +192,17 @@ class MockLLMProvider(BaseLLMProvider):
             ]
             observed_facts = [
                 f"Target domain operates as an informational demonstration repository (URL: {source_root})",
-                "No commercial product catalog, pricing, or checkout features exist on any crawled page",
+                f"Page content indicates non-commercial usage: '{sandbox_quote}'",
             ]
             inferred_signals = [
-                "Non-commercial intent deduced from the presence of sample quotations and complete absence of commercial licensing (confidence: 0.95)"
+                "Non-commercial intent deduced from demonstration text and complete absence of commercial licensing (confidence: 0.95)"
             ]
             unknown_attributes = [
-                "estimated_company_size",
-                "products_or_services",
                 "business_model",
+                "estimated_company_size",
                 "geography",
+                "products_or_services",
+                "target_audience",
                 "technology_signals",
             ]
             grounded_attributes = {
@@ -203,7 +217,7 @@ class MockLLMProvider(BaseLLMProvider):
                     "value": "Unknown / Non-Commercial",
                     "status": "inferred",
                     "confidence": 0.95,
-                    "evidence": "Absence of commercial plans or checkout indicates non-commercial entity",
+                    "evidence": sandbox_quote,
                     "source_url": source_root,
                 },
                 "products_or_services": {
@@ -228,87 +242,157 @@ class MockLLMProvider(BaseLLMProvider):
                     "source_url": None,
                 },
             }
-        else:
-            company_name = "Enterprise Tech Candidate"
-            industry = "B2B SaaS & Supply Chain Intelligence"
-            summary = "Cloud-native platform delivering automated workflows and business intelligence to mid-market and enterprise operators."
-            val_prop = "Accelerating operational speed and predictive forecasting through autonomous workflows."
-            target_audience = "Mid-market and enterprise procurement and technology leadership"
-            products_or_services = ["Workflow Intelligence Platform", "API Data Integrations"]
-            business_model = "B2B SaaS Subscription"
-            geography = "North America"
-            estimated_company_size = "51-200"
-            technology_signals = ["REST API", "Cloud Native"]
-            contact_signals = {"emails": ["contact@domain.com"], "phones": ["+1-800-555-0199"]}
-            icp_score = 88  # Strong fit
-            confidence = 0.92
-            positives = [
-                "Direct B2B workflow software platform",
-                "Operates in target technology and supply chain sector",
-                "Matches target geography and organization profile",
+        elif is_choice_india:
+            company_name = "Choice"
+            industry = "Financial Services / Stock Broking"
+            summary = "Choice (formerly Choice Broking) is a full-service stock broker in India offering online trading in stocks, mutual funds, derivatives, and advisory."
+            val_prop = "Full-service stock broking and wealth management platform offering online trading in stocks, commodities, currencies, and derivatives."
+            target_audience = "Retail and institutional investors in India"
+            products_or_services = ["Stock Trading", "Mutual Funds", "Commodities Trading", "IPOs", "Portfolio Management Services"]
+            business_model = "Brokerage Commission / Financial Services"
+            geography = "India"
+            estimated_company_size = "Unknown"  # Headcount unstated in crawled pages
+            technology_signals = []  # No tech framework stated in body content
+            contact_signals = {"emails": ["care@choiceindia.com"], "phones": ["+91-88-2424-2424"]}
+            icp_score = 20  # Disqualified: retail/institutional stock broking, not B2B SaaS
+            confidence = 0.90
+            positives = ["Active commercial business enterprise in India"]
+            negatives = [
+                "Stock broking firm rather than B2B software/SaaS vendor",
+                "Consumer and retail investor financial services focus",
+                "No verifiable company employee headcount in crawled content",
             ]
-            negatives = ["Pricing tiers require direct sales contact"]
-            reasoning = "Matches core ICP criteria: commercial enterprise software provider with verifiable B2B market offerings."
+            reasoning = "Target operates as a full-service stock broking and wealth management financial services firm in India. It does not offer commercial B2B software products and does not match the target B2B SaaS ICP criteria."
+            source_root = primary_url
             signals = [
                 {
-                    "signal": "B2B SaaS offering",
-                    "evidence": "Platform delivers enterprise-grade workflow automation.",
-                    "source_url": "https://example.com/products",
-                    "sentiment": "positive",
+                    "signal": "Full-service stock broker in India",
+                    "evidence": "Choice (formerly Choice Broking) is one of the best stock brokers in India. Start online trading in stocks, commodities, currencies, derivatives with India's leading full-service brokerage firm.",
+                    "source_url": source_root,
+                    "sentiment": "negative",
                     "status": "observed",
-                    "confidence": 0.95,
+                    "confidence": 1.0,
                 },
                 {
-                    "signal": "Clear value proposition",
-                    "evidence": "Accelerates forecasting and reduces disruption latency.",
-                    "source_url": "https://example.com/about",
-                    "sentiment": "positive",
+                    "signal": "Retail and institutional brokerage offerings",
+                    "evidence": "Start online trading in stocks, commodities, currencies, derivatives with India's leading full-service brokerage firm.",
+                    "source_url": source_root,
+                    "sentiment": "negative",
                     "status": "observed",
-                    "confidence": 0.90,
+                    "confidence": 1.0,
                 },
             ]
             observed_facts = [
-                "Platform delivers enterprise-grade workflow automation (URL: https://example.com/products)"
+                f"Choice operates as a full-service stock brokerage firm in India (URL: {source_root})",
+                "Offers trading in stocks, commodities, mutual funds, IPOs, and bonds",
             ]
             inferred_signals = [
-                "Enterprise market focus inferred from platform integrations and procurement features (confidence: 0.90)"
+                "Retail consumer and financial services orientation deduced from trading accounts and retail trading app promotions (confidence: 0.90)"
             ]
-            unknown_attributes = ["exact_revenue", "founding_date"]
+            unknown_attributes = [
+                "estimated_company_size",
+                "technology_signals",
+            ]
             grounded_attributes = {
                 "company_size": {
-                    "value": "51-200",
-                    "status": "observed",
-                    "confidence": 0.85,
-                    "evidence": "About page states 50-200 team members",
-                    "source_url": "https://example.com/about",
+                    "value": "Unknown",
+                    "status": "unknown",
+                    "confidence": 0.0,
+                    "evidence": "No employee count or team headcount stated in crawled content",
+                    "source_url": None,
                 },
                 "business_model": {
-                    "value": "B2B SaaS Subscription",
+                    "value": "Brokerage Commission / Financial Services",
                     "status": "observed",
                     "confidence": 0.95,
-                    "evidence": "Products page outlines subscription software plans",
-                    "source_url": "https://example.com/products",
+                    "evidence": "Start online trading in stocks, commodities, currencies, derivatives with India's leading full-service brokerage firm.",
+                    "source_url": source_root,
                 },
                 "products_or_services": {
-                    "value": "Workflow Intelligence Platform",
+                    "value": "Stock Trading, Mutual Funds, IPOs, Bonds",
                     "status": "observed",
                     "confidence": 0.95,
-                    "evidence": "Product features detailed on solutions page",
-                    "source_url": "https://example.com/products",
+                    "evidence": "Start online trading in stocks, commodities, currencies, derivatives with India's leading full-service brokerage firm.",
+                    "source_url": source_root,
                 },
                 "geography": {
-                    "value": "North America",
+                    "value": "India",
                     "status": "observed",
-                    "confidence": 0.90,
-                    "evidence": "Offices listed in New York and San Francisco",
-                    "source_url": "https://example.com/contact",
+                    "confidence": 1.0,
+                    "evidence": "Choice (formerly Choice Broking) is one of the best stock brokers in India.",
+                    "source_url": source_root,
                 },
                 "technology_signals": {
-                    "value": "REST API",
-                    "status": "observed",
-                    "confidence": 0.90,
-                    "evidence": "Developer docs list REST API endpoints",
-                    "source_url": "https://example.com/docs",
+                    "value": "Unknown",
+                    "status": "unknown",
+                    "confidence": 0.0,
+                    "evidence": "No software framework or architecture explicitly named in body content",
+                    "source_url": None,
+                },
+            }
+        else:
+            company_name = prompt_domain.split(".")[0].capitalize()
+            industry = "Commercial Enterprise"
+            summary = f"Commercial entity operating at {prompt_domain}."
+            val_prop = "Commercial business offerings."
+            target_audience = "Unknown"
+            products_or_services = []
+            business_model = "Unknown"
+            geography = "Unknown"
+            estimated_company_size = "Unknown"
+            technology_signals = []
+            contact_signals = {}
+            icp_score = 40
+            confidence = 0.60
+            positives = ["Publicly accessible domain"]
+            negatives = ["Unevidenced company metrics in crawled content"]
+            reasoning = "Company attributes could not be fully substantiated from crawled text; metrics set to Unknown."
+            source_root = primary_url
+            signals = []
+            observed_facts = [f"Domain active at {source_root}"]
+            inferred_signals = []
+            unknown_attributes = [
+                "business_model",
+                "estimated_company_size",
+                "geography",
+                "products_or_services",
+                "technology_signals",
+            ]
+            grounded_attributes = {
+                "company_size": {
+                    "value": "Unknown",
+                    "status": "unknown",
+                    "confidence": 0.0,
+                    "evidence": "No employee count stated in crawled content",
+                    "source_url": None,
+                },
+                "business_model": {
+                    "value": "Unknown",
+                    "status": "unknown",
+                    "confidence": 0.0,
+                    "evidence": "No business model stated in crawled content",
+                    "source_url": None,
+                },
+                "products_or_services": {
+                    "value": "Unknown",
+                    "status": "unknown",
+                    "confidence": 0.0,
+                    "evidence": "No commercial products stated in crawled content",
+                    "source_url": None,
+                },
+                "geography": {
+                    "value": "Unknown",
+                    "status": "unknown",
+                    "confidence": 0.0,
+                    "evidence": "No geography stated in crawled content",
+                    "source_url": None,
+                },
+                "technology_signals": {
+                    "value": "Unknown",
+                    "status": "unknown",
+                    "confidence": 0.0,
+                    "evidence": "No technologies stated in crawled content",
+                    "source_url": None,
                 },
             }
 

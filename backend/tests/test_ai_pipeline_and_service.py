@@ -62,9 +62,17 @@ async def test_qualification_pipeline_success():
         {
             "url": "https://pipelineai.io/about",
             "title": "About PipelineAI",
-            "content_markdown": "# About PipelineAI\nWe deliver enterprise data pipelines.",
+            "content_markdown": "# About PipelineAI\nWe deliver enterprise data pipelines with Kafka and ClickHouse support globally. Team of 25 engineers.",
             "content_hash": "hash_about_01",
             "depth": 0,
+            "metadata": {},
+        },
+        {
+            "url": "https://pipelineai.io/pricing",
+            "title": "Pricing PipelineAI",
+            "content_markdown": "# Pricing Plans\nPricing plans list tiered software subscriptions.",
+            "content_hash": "hash_pricing_01",
+            "depth": 1,
             "metadata": {},
         }
     ]
