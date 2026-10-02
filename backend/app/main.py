@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.redis_client import close_redis
+from app.services.job_service import close_arq_pool
 from app.api.v1.router import api_router
 from app.api.v1.health import router as health_router
 
@@ -20,6 +21,7 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     logger.info("Shutting down %s...", settings.PROJECT_NAME)
+    await close_arq_pool()
     await close_redis()
 
 

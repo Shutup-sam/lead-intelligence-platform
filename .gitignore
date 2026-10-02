@@ -12,6 +12,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!frontend/src/lib/
 lib64/
 parts/
 sdist/
@@ -39,9 +40,14 @@ next-env.d.ts
 
 # Environment & Secrets
 .env
-.env.local
-.env.production
-.env.development
+.env.*
+.env*.local
+!.env.example
+*.pem
+*.key
+*.cert
+*.p12
+*.crt
 
 # Docker / Volumes
 *.local
